@@ -1,7 +1,11 @@
 wip-check() {
-	set -euo pipefail
+	if [ -e "/tmp/.wipstatus" ]; then
+		cat /tmp/.wipstatus
+		return
+	fi
 	# if we're not in a dirty git repo, bail
 	[ -z "$(git status --porcelain 2>/dev/null)" ] && return
+	local head
 	head="$(git symbolic-ref HEAD)"
 	head="${head#refs/heads/}"
 
@@ -18,18 +22,27 @@ wip-check() {
 	# if the last commit is more than 60s old
 	if [ $(( $lastcommittime + 60 )) -lt "$(date +%s)" ]; then
 		(
+			echo Committing >/tmp/.wipstatus
+			sleep 5
 			remote="$(git config branch.${head:4}.remote)"
 			branch="$(git config branch.${head:4}.merge)"
-			git pull >/dev/null || true
-			git add . >/dev/null
+			git add "$(git rev-parse --show-toplevel)" >/dev/null
 			git commit -m "checkpoint $(date)" >/dev/null
-			git push -u ${remote} ${head} >/dev/null
-			echo "WIP saved" >&2
+			echo Pushing > /tmp/.wipstatus
+			sleep 5
+			git push -u "${remote}" "${head}" &>/dev/null
+			echo "WIP Saved" > /tmp/.wipstatus
+			sleep 5
+			rm /tmp/.wipstatus
 		) &
 	fi
 }
 
 wip-save() {
+	if [ -z "$1" ]; then
+		myzsh error "Need commit message."
+		exit
+	fi
 	head="$(git symbolic-ref HEAD)"
 	head="${head#refs/heads/}"
 	if [ "${head:0:4}" != "wip-" ]; then
@@ -38,7 +51,21 @@ wip-save() {
 	fi
 	remote=$(git config branch.$head.remote)
 	branch=$(git config branch.$head.merge)
-	echo git push $remote :${branch#refs/heads/}
+	GIT_EDITOR="sed -i '2,$ s/pick/squash/'" git rebase -i "${head:4}"
+	git commit --amend --message "$1"
+	git checkout "${head:4}"
+	git merge --ff-only "${branch#refs/heads/}"
+	git push $remote ":${branch#refs/heads/}"
+	git branch -d "${head}"
 }
 
-OUTPUT=wip-check
+setopt PROMPT_SUBST
+TMOUT=1
+TRAPALRM() {
+    zle reset-prompt
+}
+
+wip-output(){
+	echo '$(wip-check)'
+}
+OUTPUT="wip-output"
