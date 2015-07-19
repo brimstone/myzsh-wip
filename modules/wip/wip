@@ -68,4 +68,5 @@ TRAPALRM() {
 wip-output(){
 	echo '$(wip-check)'
 }
+
 OUTPUT="wip-output"
