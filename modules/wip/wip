@@ -1,0 +1,44 @@
+wip-check() {
+	set -euo pipefail
+	# if we're not in a dirty git repo, bail
+	[ -z "$(git status --porcelain 2>/dev/null)" ] && return
+	head="$(git symbolic-ref HEAD)"
+	head="${head#refs/heads/}"
+
+	# if head does not start with "wip-", make a branch based on $head that links to $remote
+	if [ "${head:0:4}" != "wip-" ]; then
+		remote=$(git config "branch.$head.remote")
+		branch=$(git config "branch.$head.merge")
+		head="wip-${head}"
+		git checkout -b "${head}" 1>&2
+		git push -u "${remote}" "${head}" 1>&2 # >/dev/null
+	fi
+
+	lastcommittime="$(git log -1 --pretty=%ct)"
+	# if the last commit is more than 60s old
+	if [ $(( $lastcommittime + 60 )) -lt "$(date +%s)" ]; then
+		(
+			remote="$(git config branch.${head:4}.remote)"
+			branch="$(git config branch.${head:4}.merge)"
+			git pull >/dev/null || true
+			git add . >/dev/null
+			git commit -m "checkpoint $(date)" >/dev/null
+			git push -u ${remote} ${head} >/dev/null
+			echo "WIP saved" >&2
+		) &
+	fi
+}
+
+wip-save() {
+	head="$(git symbolic-ref HEAD)"
+	head="${head#refs/heads/}"
+	if [ "${head:0:4}" != "wip-" ]; then
+		echo "Not a WIP branch"
+		return
+	fi
+	remote=$(git config branch.$head.remote)
+	branch=$(git config branch.$head.merge)
+	echo git push $remote :${branch#refs/heads/}
+}
+
+OUTPUT=wip-check
